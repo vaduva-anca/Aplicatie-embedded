@@ -1,0 +1,172 @@
+#include <Arduino_FreeRTOS.h>
+#include <queue.h>
+
+void f_temperatura(void *pvParameters) ;
+void f_valori_achizitionate(void *pvParameters);
+void f_control(void *pvParameters);
+void f_mod_manual(void *pvParameters);
+
+
+volatile int intrerupere=0;
+
+QueueHandle_t Task1_Task3;
+QueueHandle_t Task1_Task2;
+TaskHandle_t  Handle_T1_T2_T3;
+TaskHandle_t  Handle_T4;
+
+void setup() {
+pinMode(3,OUTPUT);  //pin pentru servomotor
+pinMode(A0,INPUT); //pin pentru potentiometru
+pinMode(2,INPUT); //pin pentru intrerupere
+pinMode(LED_BUILTIN,OUTPUT); //pin pentru led
+
+attachInterrupt(digitalPinToInterrupt(2), f_intrerupere, RISING);
+  
+  Task1_Task3 = xQueueCreate(1, sizeof(int)); //coada T1_T3
+
+  Task1_Task2 = xQueueCreate(1, sizeof(int)); //coada T1_T2
+
+
+  Serial.begin(9600);
+  xTaskCreate(
+    f_temperatura
+    , "Task1"
+    , 128
+    , NULL
+    , 2
+    , &Handle_T1_T2_T3);
+
+
+  xTaskCreate(
+    f_control
+    , "Task2"
+    , 128
+    , NULL
+    , 1
+    , &Handle_T1_T2_T3);
+
+  xTaskCreate(
+    f_valori_achizitionate
+    , "Task3"
+    , 128
+    , NULL
+    , 0
+    , &Handle_T1_T2_T3);
+
+    xTaskCreate(
+    f_mod_manual
+    , "Task4"
+    , 128
+    , NULL
+    , 0
+    , &Handle_T4);
+
+    
+    vTaskSuspend(Handle_T4);
+}
+
+void loop()
+{
+  // Empty.
+}
+
+void f_temperatura(void *pvParameters)
+{
+  (void) pvParameters;
+  int v_temp ;
+  for (;;)
+  {
+    v_temp = analogRead(A3);
+    int temperatura_C = (v_temp - 103) / 2;
+    if (v_temp > 150)
+    {
+      temperatura_C = temperatura_C - 1;
+    }
+    if (v_temp < 74)
+    {
+      temperatura_C = temperatura_C + 1;
+    }
+    xQueueSend( Task1_Task3, &temperatura_C, portMAX_DELAY);
+    xQueueSend( Task1_Task2, &temperatura_C, portMAX_DELAY);
+    vTaskDelay(400 / portTICK_PERIOD_MS);
+  }
+}
+
+void f_control(void *pvParameters)
+{ (void) pvParameters;
+int valoare_primita;
+  for (;;)
+  { if (xQueueReceive(Task1_Task2, &valoare_primita, portMAX_DELAY) == pdPASS)
+   {
+    if ( valoare_primita >= 20 && valoare_primita <= 25)
+      {
+        /*Pt 125-0 grade
+         Pt 126-1.44grade
+         Pt 187-89.3 grade
+         Pt 188-90.7 grade
+         Pt 250-180 grade */
+        analogWrite(3, 187);
+      }
+      else if ( valoare_primita < 20)
+      {
+        int deplasare_grade = 20 - valoare_primita ;
+        int unghi=187 - 2*deplasare_grade;
+        analogWrite(3, unghi);
+      }
+      else if ( valoare_primita > 25)
+      {
+        int deplasare_grade = valoare_primita - 25;
+        int unghi=188+2*deplasare_grade;
+        analogWrite(3,  unghi);
+      }
+   }
+    vTaskDelay(600 / portTICK_PERIOD_MS );
+  }
+}
+
+void f_valori_achizitionate(void *pvParameters)
+{ (void) pvParameters;
+  int valoare_primita;
+  char output_buffer[50];
+  for (;;)
+  {
+    if (xQueueReceive(Task1_Task3, &valoare_primita, portMAX_DELAY) == pdPASS)
+    {
+      sprintf(output_buffer, "temperatura:%d", valoare_primita);
+      Serial.println(output_buffer);
+    }
+    vTaskDelay(400 / portTICK_PERIOD_MS );
+  }
+
+}
+
+
+void  f_intrerupere()
+{ if(intrerupere==0)
+    {vTaskSuspend(Handle_T1_T2_T3);
+     vTaskResume(Handle_T4);
+     intrerupere=1;
+    }
+    else
+    { digitalWrite(LED_BUILTIN,HIGH);
+      vTaskSuspend(Handle_T4);
+      vTaskResume(Handle_T1_T2_T3);
+      intrerupere=0;
+     }
+}
+ 
+
+void f_mod_manual(void *pvParameters)
+{ (void) pvParameters;
+  char output_buffer[50];
+  int val_potentiometru;
+  
+  for (;;)
+  {sprintf(output_buffer, "Mod manual");
+  Serial.println(output_buffer);
+   digitalWrite(LED_BUILTIN,LOW);
+   val_potentiometru=analogRead(A0);
+   analogWrite(3,val_potentiometru/4);
+    vTaskDelay(200 / portTICK_PERIOD_MS );
+  }
+}
